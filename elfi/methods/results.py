@@ -483,3 +483,42 @@ class BolfiSample(Sample):
     def plot_traces(self, selector=None, axes=None, **kwargs):
         """Plot MCMC traces."""
         return vis.plot_traces(self, selector, axes, **kwargs)
+
+
+class BonfireSample(Sample):
+    """Container for results from BONFIRE."""
+
+    def __init__(self, method_name, chains, parameter_names, warmup, **kwargs):
+        """Initialize result.
+
+        Parameters
+        ----------
+        method_name : string
+            Name of inference method.
+        chains : np.array
+            Chains from sampling, warmup included. Shape: (n_chains, n_samples, n_parameters).
+        parameter_names : list : list of strings
+            List of names in the outputs dict that refer to model parameters.
+        warmup : int
+            Number of warmup iterations in chains.
+
+        """
+        chains = chains.copy()
+        shape = chains.shape
+        n_chains = shape[0]
+        warmed_up = chains[:, warmup:, :]
+        concatenated = warmed_up.reshape((-1,) + shape[2:])
+        outputs = dict(zip(parameter_names, concatenated.T))
+
+        super().__init__(
+            method_name=method_name,
+            outputs=outputs,
+            parameter_names=parameter_names,
+            chains=chains,
+            n_chains=n_chains,
+            warmup=warmup,
+            **kwargs)
+
+    def plot_traces(self, selector=None, axes=None, **kwargs):
+        """Plot MCMC traces."""
+        return vis.plot_traces(self, selector, axes, **kwargs)

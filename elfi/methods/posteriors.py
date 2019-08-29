@@ -250,3 +250,261 @@ class BolfiPosterior:
 
             else:
                 raise NotImplementedError("Currently unsupported for dim > 2")
+
+
+class BonfirePosterior:
+    r"""Container for the approximate posterior in the BONFIRE framework.
+
+    Note that when using a log discrepancy, h should become log(h).
+
+    References for BOLFI
+    ----------
+    Gutmann M U, Corander J (2016). Bayesian Optimization for Likelihood-Free Inference
+    of Simulator-Based Statistical Models. JMLR 17(125):1−47, 2016.
+    http://jmlr.org/papers/v17/15-017.html
+
+    """
+
+    def __init__(self, model, posterior_as_target, prior=None, n_inits=10, max_opt_iters=1000, seed=0):
+        """Initialize a BONFIRE posterior.
+
+        Parameters
+        ----------
+        model : elfi.bo.gpy_regression.GPyRegression
+            Instance of the surrogate model
+        prior : ScipyLikeDistribution, optional
+            By default uniform distribution within model bounds.
+        n_inits : int, optional
+            Number of initialization points in internal optimization.
+        max_opt_iters : int, optional
+            Maximum number of iterations performed in internal optimization.
+        seed : int, optional
+
+        """
+        super().__init__()
+        self.model = model
+        self.random_state = np.random.RandomState(seed)
+        self.n_inits = n_inits
+        self.max_opt_iters = max_opt_iters
+        self.posterior_as_target = posterior_as_target
+        self.prior = prior
+        self.dim = self.model.input_dim
+
+    def _posterior_logpdf(self, x):
+        # Takes the mean function of the GP,
+        # can either be negative posterior pdf or log_likelihood
+        # Returns the log posterior in both cases.
+
+        x = np.asanyarray(x)
+        ndim = x.ndim
+        x = x.reshape((-1, self.dim))
+
+        logpdf = -np.ones(len(x)) * np.inf
+
+        logi = self._within_bounds(x)
+        x = x[logi, :]
+        if len(x) == 0:
+            if ndim == 0 or (ndim == 1 and self.dim > 1):
+                logpdf = logpdf[0]
+            return logpdf
+
+        if self.posterior_as_target:
+            # First the mean pdf is returned
+            pdf = self.model.predict_mean(x)
+            # Then it's multiplied by -1 and logarithm is taken
+            pdf = -np.ones(pdf.shape) * pdf
+            # Take off the np.squeeze if it works without it
+            logpdf[logi] = np.squeeze(np.log(pdf))
+
+            if ndim == 0 or (ndim == 1 and self.dim > 1):
+                logpdf = logpdf[0]
+                return logpdf
+
+            return logpdf
+        else:
+            # We have now already the log likelihood
+            log_likelihood = -self.model.predict_mean(x)
+            # log_likelihood = -np.ones(log_likelihood.shape) * log_likelihood
+            logpdf[logi] = np.squeeze(log_likelihood + self.prior.logpdf(x))
+
+            return logpdf
+
+    def logpdf(self, x):
+        """Return the unnormalized log-posterior pdf at x.
+
+        Parameters
+        ----------
+        x : np.array
+
+        Returns
+        -------
+        float
+
+        """
+        return self._posterior_logpdf(x)
+
+    def pdf(self, x):
+        """Return the unnormalized posterior pdf at x.
+
+        Parameters
+        ----------
+        x : np.array
+
+        Returns
+        -------
+        float
+
+        """
+        return np.exp(self.logpdf(x))
+
+    def gradient_pdf(self, x):
+        """Return the gradient of the posterior pdf at x.
+
+        Parameters
+        ----------
+        x : np.array
+
+        Returns
+        -------
+        np.array
+
+        """
+        x = np.asanyarray(x)
+        ndim = x.ndim
+        x = x.reshape((-1, self.dim))
+        grad = np.zeros_like(x)
+        logi = self._within_bounds(x)
+        x = x[logi, :]
+        if len(x) == 0:
+            if ndim == 0 or (ndim == 1 and self.dim > 1):
+                grad = grad[0]
+            return grad
+
+        # Wheter the gradient is from the posterior pdf or from the likelihood
+        # Remember the options..
+        # posterior from GP is not log
+        # log ratio from GP is now log
+        if self.posterior_as_target:
+            grad[logi, :] = self.model.predictive_gradient_mean(x)
+
+            if ndim == 0 or (ndim == 1 and self.dim > 1):
+                grad = grad[0]
+
+            return grad
+        else:
+            # In this case we don't need to do anything (yet)
+            pass
+
+    def gradient_logpdf(self, x):
+        """Return the gradient of the unnormalized log-posterior pdf at x.
+
+        Parameters
+        ----------
+        x : np.array
+
+        Returns
+        -------
+        np.array
+
+        """
+        x = np.asanyarray(x)
+        ndim = x.ndim
+        x = x.reshape((-1, self.dim))
+
+        # Initialize the gradients to have the same shape as x
+        grad = np.zeros_like(x)
+
+        logi = self._within_bounds(x)
+        # Now we have chosen x:s which are within bounds
+        # And we take into account all the parameters
+        x = x[logi, :]
+
+        # What happens here? if there is no value then return 0?
+        if len(x) == 0:
+            if ndim == 0 or (ndim == 1 and self.dim > 1):
+                grad = grad[0]
+            return grad
+
+        if self.posterior_as_target:
+            mean_grad = -self.gradient_pdf(x)
+            mean_pdf = self.pdf(x)
+            epsilon = np.finfo(float).eps
+
+            # Comparison if the mean_pdf is too close to 0
+            if np.abs(mean_pdf) < epsilon:
+                grad[logi, :] = np.true_divide(mean_grad, (mean_pdf + epsilon))
+            else:
+                grad[logi, :] = np.true_divide(mean_grad, mean_pdf)
+
+            if ndim == 0 or (ndim == 1 and self.dim > 1):
+                grad = grad[0]
+
+            # nan grads are result from -inf logpdf
+            # return np.where(np.isnan(grads), 0, grads)[0]
+            return grad
+        else:
+            # In the case where we already have the log likelihood
+            # Do I take into account now the logic points?
+            grad_logpdf = -self.model.predictive_gradient_mean(x) + \
+                 self.prior.gradient_logpdf(x)
+
+            grad[logi, :] = grad_logpdf  # np.squeeze
+
+            if ndim == 0 or (ndim == 1 and self.dim > 1):
+                grad = grad[0]
+
+            return grad
+
+    def _within_bounds(self, x):
+        # Marks if the x is within bounds
+        # bounds is a list of the parameter bounds [(b1, b2), ...]
+        x = x.reshape((-1, self.dim))
+        logical = np.ones(len(x), dtype=bool)
+        for i in range(self.dim):
+            logical *= (x[:, i] >= self.model.bounds[i][0])
+            logical *= (x[:, i] <= self.model.bounds[i][1])
+        return logical
+
+    def plot(self, logpdf=False):
+        """Plot the posterior pdf.
+
+        Currently only supports 1 and 2 dimensional cases.
+
+        Parameters
+        ----------
+        logpdf : bool
+            Whether to plot logpdf instead of pdf.
+
+        """
+        # Now I should import the information about the parameters too
+        if logpdf:
+            fun = self.logpdf
+        else:
+            fun = self.pdf
+
+        with np.warnings.catch_warnings():
+            np.warnings.filterwarnings('ignore')
+
+            if len(self.model.bounds) == 1:
+                mn = self.model.bounds[0][0]
+                mx = self.model.bounds[0][1]
+                dx = (mx - mn) / 200.0
+                x = np.arange(mn, mx, dx)
+                pd = np.zeros(len(x))
+                for i in range(len(x)):
+                    pd[i] = fun([x[i]])
+                plt.figure()
+                plt.plot(x, pd)
+                plt.xlim(mn, mx)
+                plt.ylim(min(pd) * 1.05, max(pd) * 1.05)
+                plt.show()
+
+            elif len(self.model.bounds) == 2:
+                x, y = np.meshgrid(
+                    np.linspace(*self.model.bounds[0]), np.linspace(*self.model.bounds[1]))
+                z = (np.vectorize(lambda a, b: fun(np.array([a, b]))))(x, y)
+                plt.contour(x, y, z)
+                plt.show()
+
+            else:
+                raise NotImplementedError("Currently unsupported for dim > 2")
