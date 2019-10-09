@@ -309,12 +309,9 @@ class BonfirePosterior:
             return logpdf
 
         if self.posterior_as_target:
-            # First the mean pdf is returned
-            pdf = self.model.predict_mean(x)
-            # Then it's multiplied by -1 and logarithm is taken
-            pdf = -np.ones(pdf.shape) * pdf
-            # Take off the np.squeeze if it works without it
-            logpdf[logi] = np.squeeze(np.log(pdf))
+            # First the negative mean logpdf is returned.
+            logpdf = -self.model.predict_mean(x)
+            logpdf[logi] = np.squeeze(logpdf)
 
             if ndim == 0 or (ndim == 1 and self.dim > 1):
                 logpdf = logpdf[0]
@@ -322,9 +319,8 @@ class BonfirePosterior:
 
             return logpdf
         else:
-            # We have now already the log likelihood
+            # First the negative log likelihood is returned.
             log_likelihood = -self.model.predict_mean(x)
-            # log_likelihood = -np.ones(log_likelihood.shape) * log_likelihood
             logpdf[logi] = np.squeeze(log_likelihood + self.prior.logpdf(x))
 
             return logpdf
@@ -369,31 +365,36 @@ class BonfirePosterior:
         np.array
 
         """
-        x = np.asanyarray(x)
-        ndim = x.ndim
-        x = x.reshape((-1, self.dim))
-        grad = np.zeros_like(x)
-        logi = self._within_bounds(x)
-        x = x[logi, :]
-        if len(x) == 0:
-            if ndim == 0 or (ndim == 1 and self.dim > 1):
-                grad = grad[0]
-            return grad
+        return NotImplementedError('Not implemented yet')
+        # x = np.asanyarray(x)
+        # ndim = x.ndim
+        # x = x.reshape((-1, self.dim))
+        # grad = np.zeros_like(x)
+        # logi = self._within_bounds(x)
+        # x = x[logi, :]
+        # if len(x) == 0:
+        #    if ndim == 0 or (ndim == 1 and self.dim > 1):
+        #        grad = grad[0]
+        #    return grad
 
         # Wheter the gradient is from the posterior pdf or from the likelihood
         # Remember the options..
         # posterior from GP is not log
         # log ratio from GP is now log
-        if self.posterior_as_target:
-            grad[logi, :] = self.model.predictive_gradient_mean(x)
 
-            if ndim == 0 or (ndim == 1 and self.dim > 1):
-                grad = grad[0]
+        # Ei saisi palauttaa tätä
+        # Lasketaan tämä mielummin tuolla gradient_logpdf:ssä
+        # Eli tämä funktio voitaisiin korvata vain sillä että sitä ei ole vielä toteutettu.
+        # if self.posterior_as_target:
+        #    grad[logi, :] = self.model.predictive_gradient_mean(x)
 
-            return grad
-        else:
+        #    if ndim == 0 or (ndim == 1 and self.dim > 1):
+        #        grad = grad[0]
+
+        #    return grad
+        # else:
             # In this case we don't need to do anything (yet)
-            pass
+        #    pass
 
     def gradient_logpdf(self, x):
         """Return the gradient of the unnormalized log-posterior pdf at x.
@@ -419,14 +420,15 @@ class BonfirePosterior:
         # And we take into account all the parameters
         x = x[logi, :]
 
-        # What happens here? if there is no value then return 0?
         if len(x) == 0:
             if ndim == 0 or (ndim == 1 and self.dim > 1):
                 grad = grad[0]
             return grad
 
         if self.posterior_as_target:
-            mean_grad = -self.gradient_pdf(x)
+            # Retruns gradient of the mean negative posterior pdf
+            mean_grad = -self.model.predictive_gradient_mean(x)
+            # Returns the posterior pdf (not negative anymore)
             mean_pdf = self.pdf(x)
             epsilon = np.finfo(float).eps
 

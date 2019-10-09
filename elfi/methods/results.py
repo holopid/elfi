@@ -522,3 +522,20 @@ class BonfireSample(Sample):
     def plot_traces(self, selector=None, axes=None, **kwargs):
         """Plot MCMC traces."""
         return vis.plot_traces(self, selector, axes, **kwargs)
+
+
+# For testing LFIRE
+class LfirePosterior(ParameterInferenceResult):
+    """Class documentation comes here."""
+
+    def __init__(self, method_name, outputs, parameter_names, **kwargs):
+        """Class method documentation comes here."""
+        super(LfirePosterior, self).__init__(
+            method_name=method_name,
+            outputs=outputs,
+            parameter_names=parameter_names,
+            **kwargs)
+
+    def results(self):
+        """Class method documentation comes here."""
+        return self.outputs

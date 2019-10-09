@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # For BONFIRE
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegressionCV
 from sklearn.preprocessing import StandardScaler
 
 import elfi.client
@@ -1377,7 +1377,7 @@ class BONFIRE(ParameterInference):
     def __init__(self,
                  model,
                  marginal=None,
-                 C=1.0,
+                 Cs=1.0,
                  n_training_data=None,
                  bounds=None,
                  posterior_as_target=False,
@@ -1397,7 +1397,7 @@ class BONFIRE(ParameterInference):
         model : ElfiModel or NodeReference
         marginal : list, optional
             List containing the marginal data for the ratio-estimation.
-        C : float, optional
+        Cs : float or numpy array, optional
             Inverse of regularization strength.
         n_training_data : int
             The size of the training data. Same size for marginal data if being created.
@@ -1439,13 +1439,13 @@ class BONFIRE(ParameterInference):
         # Jan hasn't used output_names at all
         # output_names = [target_name] + model.parameter_names
 
-        if n_training_data == None:
+        if n_training_data is None:
             raise ValueError('You must add the size of training data (n_training_data)!')
 
         self.n_training_data = ceil(n_training_data)
         self.logreg_config = {
             'penalty': 'l1',
-            'C': C,
+            'Cs': Cs,
             'solver': 'liblinear',
         }
         # Flag for the update function and for the BonfirePosterior class
@@ -1454,7 +1454,6 @@ class BONFIRE(ParameterInference):
         # output_names=None in Jan's code, in BO it's passed
         super().__init__(model, output_names=None, batch_size=1, **kwargs)
 
-        # Jan's code
         self.summary_names = self._get_summary_names()
         if len(self.summary_names) == 0:
             raise NotImplementedError('Your model must have at least one Summary node.')
@@ -1464,10 +1463,16 @@ class BONFIRE(ParameterInference):
         
         # Initializing the state keys for the obtained posterior value 
         # and for the parameter values
-        self.state['posterior'] = 0
-        self.state['neg_posterior'] = 0
+        if self.posterior_as_target:
+            self.state['neg_log_posterior'] = -np.inf
+        else:
+            self.state['neg_log_likelihood'] = -np.inf
         for parameter_name in self.parameter_names:
             self.state[parameter_name] = []
+        # Store values of coefficients, C and intercept
+        self.state['coefficients'] = []
+        self.state['C'] = []
+        self.state['intercept'] = []
 
 
         target_model = target_model or GPyRegression(self.model.parameter_names, bounds=bounds)
@@ -1496,7 +1501,6 @@ class BONFIRE(ParameterInference):
         self.state['last_GP_update'] = self.n_initial_evidence
         self.state['acquisition'] = []
 
-
     def _get_summary_names(self):
         """Get the names of summary statistics."""
         summary_names = []
@@ -1507,15 +1511,54 @@ class BONFIRE(ParameterInference):
     
     def _get_observed_summary_values(self):
         """Get summary statistic values for observed data."""
-        observed_ss = [self.model[summary_name].observed for summary_name in self.summary_names]
-        observed_ss = np.array(observed_ss).T
+        observed_ss = self._get_summary_values(observed=True)
         return observed_ss
-    
+
+    def _get_summary_values(self, observed=False, batch=None):
+        """Returns the summary statistics values of given data.
+        
+        Parameters:
+        ----------
+        observed : boolean
+            If true the function returns the summary statistcs of the observed data,
+            if false the function returns the summary statistics of given batch.
+        batch : numpy array
+            The data set containing the values of Summary nodes.
+        
+        Returns:
+        ----------
+        The summary statistics of given data for each variable (#observations x #summary statistcs)
+        """
+        # Create the list to store the values
+        ss_list = []
+        if observed is True:
+            for summary_name in self.summary_names:
+                summary_statistics = np.array([self.model[summary_name].observed])
+                # If summary statistics contain more than one value
+                if summary_statistics.ndim > 2:
+                    for i in np.arange(summary_statistics.shape[2]):
+                        ss_list.append(summary_statistics[:,:,i][0])
+                elif summary_statistics.ndim == 2:
+                    ss_list.append(summary_statistics[0])
+            return np.array(ss_list).T
+
+        elif observed is False:
+            if batch is None:
+                raise NotImplementedError("You need to give a batch.")
+            for summary_name in self.summary_names:
+                summary_statistics = np.array([batch[summary_name]])
+                # If summary statistics contain more than one value
+                if summary_statistics.ndim > 2:
+                    for i in np.arange(summary_statistics.shape[2]):
+                        ss_list.append(summary_statistics[:,:,i][0])
+                elif summary_statistics.ndim == 2:
+                    ss_list.append(summary_statistics[0])
+            return np.array(ss_list).T
+
     def _generate_marginal(self):
         """Class method documentation comes here."""
-        batch = self.model.generate(self.n_training_data)  # batch_size
-        marginal = [batch[summary_name] for summary_name in self.summary_names]
-        marginal = np.array(marginal).T
+        batch = self.model.generate(self.n_training_data)
+        marginal = self._get_summary_values(observed=False, batch=batch)
         return marginal
 
     def _resolve_marginal(self, marginal):
@@ -1531,7 +1574,6 @@ class BONFIRE(ParameterInference):
             # TODO: add raised text.
             raise TypeError('Put some text here!')
 
-    # From BayesianOptimization
     def _resolve_initial_evidence(self, initial_evidence):
         # Some sensibility limit for starting GP regression
         precomputed = None
@@ -1610,7 +1652,7 @@ class BONFIRE(ParameterInference):
 
         # Wheter the posterior or likelihood is used.
         if self.posterior_as_target:
-            outputs['neg_posterior'] = self.target_model.Y
+            outputs['neg_log_posterior'] = self.target_model.Y
         else:
             outputs['neg_log_likelihood'] = self.target_model.Y
 
@@ -1639,8 +1681,7 @@ class BONFIRE(ParameterInference):
         
         # Creating the training data for the classifier (marginal is created)
         training_data = self.model.generate(batch_size=self.n_training_data, outputs=self.summary_names, with_values=value_dict)
-        summaries = [training_data[summary_name] for summary_name in self.summary_names]
-        summaries = np.array(summaries).T
+        summaries = self._get_summary_values(observed=False, batch=training_data)
 
         # Create training data
         X = np.vstack((summaries, self.marginal))
@@ -1651,7 +1692,7 @@ class BONFIRE(ParameterInference):
         X_scaled = scaler.fit_transform(X)
 
         # Logistic regression
-        m = LogisticRegression(**self.logreg_config)
+        m = LogisticRegressionCV(**self.logreg_config)
         m.fit(X_scaled, y)
 
         # Convert back to the original scale
@@ -1666,21 +1707,31 @@ class BONFIRE(ParameterInference):
             epsilon = np.finfo(float).eps
             log_likelihood_value = np.log(epsilon)
     
-        likelihood_value = np.exp(log_likelihood_value)
+        # likelihood_value = np.exp(log_likelihood_value)
 
-        # Joint prior value
-        joint_prior_value = self.joint_prior.pdf(parameter_values)
+        # Joint log prior value
+        joint_log_prior = self.joint_prior.logpdf(parameter_values)
 
-        # Posterior value
-        posterior_value = joint_prior_value * likelihood_value
+        if not np.isfinite(joint_log_prior):
+            epsilon = np.finfo(float).eps
+            joint_log_prior = np.log(epsilon)
+
+        # Log posterior value
+        log_posterior_value = joint_log_prior + log_likelihood_value
+
+        # if not np.isfinite(log_posterior_value):
+        #    epsilon = np.finfo(float).eps
+        #    log_posterior_value = np.log(epsilon)
 
         # Let's store the values
-        self.state['posterior'] = posterior_value[0]
-        self.state['neg_posterior'] = (-1)*posterior_value[0]
-        # self.state['neg_likelihood'] = (-1)*likelihood_value[0]
         self.state['neg_log_likelihood'] = (-1)*log_likelihood_value[0]
+        self.state['neg_log_posterior'] = (-1)*log_posterior_value[0]
         for parameter_name in self.parameter_names:
             self.state[parameter_name].append(batch[parameter_name])
+        # Stores the coefficients, used C value, and intercept
+        self.state['coefficients'].append(coefficients)
+        self.state['C'].append(m.C_)
+        self.state['intercept'].append(intercept)
 
         # BO's code starts below
         self.state['n_evidence'] += self.batch_size
@@ -1688,9 +1739,9 @@ class BONFIRE(ParameterInference):
 
         # Wheter the posterior or log_likelihood is the target for the GP
         if self.posterior_as_target:
-            self._report_batch(batch_index, params, self.state['neg_posterior'])  # batch[self.target_name]
+            self._report_batch(batch_index, params, self.state['neg_log_posterior'])  # batch[self.target_name]
             optimize = self._should_optimize()
-            self.target_model.update(params, self.state['neg_posterior'], optimize)  # batch[self.target_name]
+            self.target_model.update(params, self.state['neg_log_posterior'], optimize)  # batch[self.target_name]
             if optimize:
                 self.state['last_GP_update'] = self.target_model.n_evidence
         else:
@@ -1699,6 +1750,10 @@ class BONFIRE(ParameterInference):
             self.target_model.update(params, self.state['neg_log_likelihood'], optimize)
             if optimize:
                 self.state['last_GP_update'] = self.target_model.n_evidence
+
+    def get_coefficients(self):
+        """Returns the coefficients and used c values at each iteration."""
+        return self.state['coefficients'], self.state['C']
 
     def _report_batch(self, batch_index, params, value):
         str = "Received batch {}:\n".format(batch_index)
@@ -1792,9 +1847,6 @@ class BONFIRE(ParameterInference):
         if self.state['n_batches'] == 0:
             raise ValueError('Model is not fitted yet, please see the `fit` method.')
 
-        # Now this needs to be modified to return the BonfirePosterior. 
-        # And now this is the case that the GP surface is the posterior.
-        # Prior is only needed to find the minimum value of the GP mean function.
         return BonfirePosterior(self.target_model,
                                  posterior_as_target=self.posterior_as_target,
                                  prior=self.joint_prior)
@@ -1820,7 +1872,6 @@ class BONFIRE(ParameterInference):
             axes=f.axes[0],
             **options)
 
-        # Something goes wrong here, find out what it is
         # Draw the latest acquisitions
         if options.get('interactive'):
             point = gp.X[-1, :]
@@ -1903,7 +1954,6 @@ class BONFIRE(ParameterInference):
         posterior = self.extract_posterior()
         warmup = warmup or n_samples // 2
 
-        # Check if this is needed in this case or how it can be modified
         # Unless given, select the evidence points with smallest discrepancy
         if initials is not None:
             if np.asarray(initials).shape != (n_chains, self.target_model.input_dim):
