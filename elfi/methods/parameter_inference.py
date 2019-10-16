@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # For BONFIRE
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 import elfi.client
@@ -1355,21 +1355,6 @@ class BOLFI(BayesianOptimization):
             n_sim=self.state['n_sim'],
             seed=self.seed)
 
-# Ida's code starts below.
-
-# The class BONFIRE inherits now the BayesianOptimization class.
-# It can be good idea to find the minimum of the computed (-1)*likelihood function.
-# I will do so that BONFIRE inherits both BayesianOptimatimization and LFIRE classes.
-
-# in LFIRE think about 
-#   - the penalty, 
-#   - can the user determine the weights, 
-#   - cross-validation is not needed at this point, 
-#   - remember the possible problems in gmlnet 
-
-# What I want out from LFIRE is:
-#   - likelihood_value
-#   - posterior_value (joint_prior_value * likelihood_value)
 
 class BONFIRE(ParameterInference):
     """Bayesian Optimization for Likelihood-Free Inference by Ratio-Estimation."""
@@ -1378,6 +1363,7 @@ class BONFIRE(ParameterInference):
                  model,
                  marginal=None,
                  Cs=1.0,
+                 cv=None,
                  n_training_data=None,
                  bounds=None,
                  posterior_as_target=False,
@@ -1399,6 +1385,8 @@ class BONFIRE(ParameterInference):
             List containing the marginal data for the ratio-estimation.
         Cs : float or numpy array, optional
             Inverse of regularization strength.
+        cv : int or string
+            If cv is integer, then k-Fold is used where k=cv. Otherwise another CV method from scikit-learn.
         n_training_data : int
             The size of the training data. Same size for marginal data if being created.
         bounds : dict, optional
@@ -1443,11 +1431,23 @@ class BONFIRE(ParameterInference):
             raise ValueError('You must add the size of training data (n_training_data)!')
 
         self.n_training_data = ceil(n_training_data)
-        self.logreg_config = {
-            'penalty': 'l1',
-            'Cs': Cs,
-            'solver': 'liblinear',
-        }
+
+        if isinstance(Cs, np.ndarray):
+            self.CV_boolean = True
+            self.logreg_config = {
+                'penalty': 'l1',
+                'Cs': Cs,
+                'solver': 'liblinear',
+                'cv': cv,
+            }
+        else:
+            self.CV_boolean = False
+            self.logreg_config = {
+                'penalty': 'l1',
+                'C': Cs,
+                'solver': 'liblinear',
+            }
+
         # Flag for the update function and for the BonfirePosterior class
         self.posterior_as_target = posterior_as_target
         # Now this gets the model from the super class
@@ -1692,7 +1692,11 @@ class BONFIRE(ParameterInference):
         X_scaled = scaler.fit_transform(X)
 
         # Logistic regression
-        m = LogisticRegressionCV(**self.logreg_config)
+        if self.CV_boolean is True:
+            m = LogisticRegressionCV(**self.logreg_config)
+        else:
+            m = LogisticRegression(**self.logreg_config)
+
         m.fit(X_scaled, y)
 
         # Convert back to the original scale
@@ -1730,7 +1734,8 @@ class BONFIRE(ParameterInference):
             self.state[parameter_name].append(batch[parameter_name])
         # Stores the coefficients, used C value, and intercept
         self.state['coefficients'].append(coefficients)
-        self.state['C'].append(m.C_)
+        if self.CV_boolean is True:
+            self.state['C'].append(m.C_)
         self.state['intercept'].append(intercept)
 
         # BO's code starts below
@@ -1753,7 +1758,10 @@ class BONFIRE(ParameterInference):
 
     def get_coefficients(self):
         """Returns the coefficients and used c values at each iteration."""
-        return self.state['coefficients'], self.state['C']
+        if self.CV_boolean is True:
+            return self.state['coefficients'], self.state['C']
+        else:
+            return self.state['coefficients']
 
     def _report_batch(self, batch_index, params, value):
         str = "Received batch {}:\n".format(batch_index)
