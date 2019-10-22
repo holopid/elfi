@@ -85,12 +85,12 @@ class LFIRE(ParameterInference):
 
     def update(self, batch, batch_index):
         """Class method documenation comes here."""
-        super(LFIRE, self).update(batch, batch_index)
+        super().update(batch, batch_index)  # LFIRE, self
 
         # Parse likelihood values
-        likelihood = self._get_summary_values(batch=batch)
-        # likelihood = [batch[summary_name] for summary_name in self.summary_names]
-        # likelihood = np.array(likelihood).T
+        # likelihood = self._get_summary_values(batch=batch)
+        likelihood = [batch[summary_name] for summary_name in self.summary_names]
+        likelihood = np.column_stack(likelihood)
 
         # Create training data
         X = np.vstack((likelihood, self.marginal))
@@ -156,53 +156,53 @@ class LFIRE(ParameterInference):
             # TODO: add raised text.
             raise TypeError('Put some text here!')
 
-    def _get_summary_values(self, observed=False, batch=None):
-        """Returns the summary statistics values of given data.
+    # def _get_summary_values(self, observed=False, batch=None):
+    #    """Returns the summary statistics values of given data.
 
-        Parameters:
-        ----------
-        observed : boolean
-            If true the function returns the summary statistcs of the observed data,
-            if false the function returns the summary statistics of given batch.
-        batch : numpy array
-            The data set containing the values of Summary nodes.
+    #    Parameters:
+    #    ----------
+    #    observed : boolean
+    #        If true the function returns the summary statistcs of the observed data,
+    #        if false the function returns the summary statistics of given batch.
+    #    batch : numpy array
+    #        The data set containing the values of Summary nodes.
 
-        Returns:
-        ----------
-        The summary statistics of given data for each variable (#observations x #summary statistcs)
-        """
-        # Create the list to store the values
-        ss_list = []
-        if observed is True:
-            for summary_name in self.summary_names:
-                summary_statistics = np.array([self.model[summary_name].observed])
+    #    Returns:
+    #    ----------
+    #    The summary statistics of given data for each variable (#observations x #summary statistcs)
+    #    """
+    #    # Create the list to store the values
+    #    ss_list = []
+    #    if observed is True:
+    #        for summary_name in self.summary_names:
+    #            summary_statistics = np.array([self.model[summary_name].observed])
                 # If summary statistics contain more than one value
-                if summary_statistics.ndim > 2:
-                    for i in np.arange(summary_statistics.shape[2]):
-                        ss_list.append(summary_statistics[:, :, i][0])
-                elif summary_statistics.ndim == 2:
-                    ss_list.append(summary_statistics[0])
-            return np.array(ss_list).T
+    #            if summary_statistics.ndim > 2:
+    #                for i in np.arange(summary_statistics.shape[2]):
+    #                    ss_list.append(summary_statistics[:, :, i][0])
+    #            elif summary_statistics.ndim == 2:
+    #                ss_list.append(summary_statistics[0])
+    #        return np.column_stack(ss_list)  # np.array(ss_list).T
 
-        elif observed is False:
-            if batch is None:
-                raise NotImplementedError("You need to give a batch.")
-            for summary_name in self.summary_names:
-                summary_statistics = np.array([batch[summary_name]])
+    #    elif observed is False:
+    #        if batch is None:
+    #            raise NotImplementedError("You need to give a batch.")
+    #        for summary_name in self.summary_names:
+    #            summary_statistics = np.array([batch[summary_name]])
                 # If summary statistics contain more than one value
-                if summary_statistics.ndim > 2:
-                    for i in np.arange(summary_statistics.shape[2]):
-                        ss_list.append(summary_statistics[:, :, i][0])
-                elif summary_statistics.ndim == 2:
-                    ss_list.append(summary_statistics[0])
-            return np.array(ss_list).T
+    #            if summary_statistics.ndim > 2:
+    #                for i in np.arange(summary_statistics.shape[2]):
+    #                    ss_list.append(summary_statistics[:, :, i][0])
+    #            elif summary_statistics.ndim == 2:
+    #                ss_list.append(summary_statistics[0])
+    #        return np.column_stack(ss_list)  # np.array(ss_list).T
 
     def _generate_marginal(self):
         """Class method documentation comes here."""
         batch = self.model.generate(self.batch_size)
-        marginal = self._get_summary_values(batch=batch)
-        # marginal = [batch[summary_name] for summary_name in self.summary_names]
-        # marginal = np.array(marginal).T
+        # marginal = self._get_summary_values(batch=batch)
+        marginal = [batch[summary_name] for summary_name in self.summary_names]
+        marginal = np.column_stack(marginal)
         return marginal
 
     def _resolve_marginal(self, marginal):
@@ -228,7 +228,7 @@ class LFIRE(ParameterInference):
 
     def _get_observed_summary_values(self):
         """Get summary statistic values for observed data."""
-        observed_ss = self._get_summary_values(observed=True)
-        # observed_ss = [self.model[summary_name].observed for summary_name in self.summary_names]
-        # observed_ss = np.array(observed_ss).T
+        # observed_ss = self._get_summary_values(observed=True)
+        observed_ss = [self.model[summary_name].observed for summary_name in self.summary_names]
+        observed_ss = np.column_stack(observed_ss)
         return observed_ss

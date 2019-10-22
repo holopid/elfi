@@ -265,7 +265,7 @@ class BonfirePosterior:
 
     """
 
-    def __init__(self, model, posterior_as_target, prior=None, n_inits=10, max_opt_iters=1000, seed=0):
+    def __init__(self, model, posterior_as_target, prior=None, n_inits=10, seed=0):  # max_opt_iters=1000,
         """Initialize a BONFIRE posterior.
 
         Parameters
@@ -285,7 +285,7 @@ class BonfirePosterior:
         self.model = model
         self.random_state = np.random.RandomState(seed)
         self.n_inits = n_inits
-        self.max_opt_iters = max_opt_iters
+        # self.max_opt_iters = max_opt_iters
         self.posterior_as_target = posterior_as_target
         self.prior = prior
         self.dim = self.model.input_dim
@@ -310,8 +310,7 @@ class BonfirePosterior:
 
         if self.posterior_as_target:
             # First the negative mean logpdf is returned.
-            logpdf = -self.model.predict_mean(x)
-            logpdf[logi] = np.squeeze(logpdf)
+            logpdf[logi] = -self.model.predict_mean(x).squeeze()
 
             if ndim == 0 or (ndim == 1 and self.dim > 1):
                 logpdf = logpdf[0]
@@ -320,8 +319,8 @@ class BonfirePosterior:
             return logpdf
         else:
             # First the negative log likelihood is returned.
-            log_likelihood = -self.model.predict_mean(x)
-            logpdf[logi] = np.squeeze(log_likelihood + self.prior.logpdf(x))
+            log_likelihood = -self.model.predict_mean(x).squeeze()
+            logpdf[logi] = log_likelihood + self.prior.logpdf(x)
 
             return logpdf
 
@@ -365,7 +364,7 @@ class BonfirePosterior:
         np.array
 
         """
-        return NotImplementedError('Not implemented yet')
+        raise NotImplementedError('Not implemented yet')
         # x = np.asanyarray(x)
         # ndim = x.ndim
         # x = x.reshape((-1, self.dim))

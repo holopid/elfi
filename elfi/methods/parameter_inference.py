@@ -1511,54 +1511,58 @@ class BONFIRE(ParameterInference):
     
     def _get_observed_summary_values(self):
         """Get summary statistic values for observed data."""
-        observed_ss = self._get_summary_values(observed=True)
+        observed_ss = [self.model[summary_name].observed for summary_name in self.summary_names]
+        observed_ss = np.column_stack(observed_ss)
+        # observed_ss = self._get_summary_values(observed=True)
         return observed_ss
 
-    def _get_summary_values(self, observed=False, batch=None):
-        """Returns the summary statistics values of given data.
+    # def _get_summary_values(self, observed=False, batch=None):
+    #     """Returns the summary statistics values of given data.
+    #    
+    #    Parameters:
+    #    ----------
+    #    observed : boolean
+    #        If true the function returns the summary statistcs of the observed data,
+    #        if false the function returns the summary statistics of given batch.
+    #    batch : numpy array
+    #        The data set containing the values of Summary nodes.
         
-        Parameters:
-        ----------
-        observed : boolean
-            If true the function returns the summary statistcs of the observed data,
-            if false the function returns the summary statistics of given batch.
-        batch : numpy array
-            The data set containing the values of Summary nodes.
-        
-        Returns:
-        ----------
-        The summary statistics of given data for each variable (#observations x #summary statistcs)
-        """
+    #    Returns:
+    #    ----------
+    #    The summary statistics of given data for each variable (#observations x #summary statistcs)
+    #    """
         # Create the list to store the values
-        ss_list = []
-        if observed is True:
-            for summary_name in self.summary_names:
-                summary_statistics = np.array([self.model[summary_name].observed])
+    #    ss_list = []
+    #    if observed is True:
+    #        for summary_name in self.summary_names:
+    #            summary_statistics = np.array([self.model[summary_name].observed])
                 # If summary statistics contain more than one value
-                if summary_statistics.ndim > 2:
-                    for i in np.arange(summary_statistics.shape[2]):
-                        ss_list.append(summary_statistics[:,:,i][0])
-                elif summary_statistics.ndim == 2:
-                    ss_list.append(summary_statistics[0])
-            return np.array(ss_list).T
+    #            if summary_statistics.ndim > 2:
+    #                for i in np.arange(summary_statistics.shape[2]):
+    #                    ss_list.append(summary_statistics[:,:,i][0])
+    #            elif summary_statistics.ndim == 2:
+    #                ss_list.append(summary_statistics[0])
+    #        return np.column_stack(ss_list)  # np.array(ss_list).T
 
-        elif observed is False:
-            if batch is None:
-                raise NotImplementedError("You need to give a batch.")
-            for summary_name in self.summary_names:
-                summary_statistics = np.array([batch[summary_name]])
-                # If summary statistics contain more than one value
-                if summary_statistics.ndim > 2:
-                    for i in np.arange(summary_statistics.shape[2]):
-                        ss_list.append(summary_statistics[:,:,i][0])
-                elif summary_statistics.ndim == 2:
-                    ss_list.append(summary_statistics[0])
-            return np.array(ss_list).T
+    #    elif observed is False:
+    #        if batch is None:
+    #            raise NotImplementedError("You need to give a batch.")
+    #        for summary_name in self.summary_names:
+    #            summary_statistics = np.array([batch[summary_name]])
+    #            # If summary statistics contain more than one value
+    #            if summary_statistics.ndim > 2:
+    #                for i in np.arange(summary_statistics.shape[2]):
+    #                    ss_list.append(summary_statistics[:,:,i][0])
+    #            elif summary_statistics.ndim == 2:
+    #                ss_list.append(summary_statistics[0])
+    #        return np.column_stack(ss_list)  # np.array(ss_list).T
 
     def _generate_marginal(self):
         """Class method documentation comes here."""
         batch = self.model.generate(self.n_training_data)
-        marginal = self._get_summary_values(observed=False, batch=batch)
+        # marginal = self._get_summary_values(observed=False, batch=batch)
+        marginal = [batch[summary_name] for summary_name in self.summary_names]
+        marginal = np.column_stack(marginal)
         return marginal
 
     def _resolve_marginal(self, marginal):
@@ -1673,19 +1677,32 @@ class BONFIRE(ParameterInference):
         super().update(batch, batch_index)
 
         # Dictionary and vector to store the fixed parameter values
-        value_dict = dict()
-        parameter_values = []
-        for parameter in self.parameter_names:
-            value_dict[parameter] = np.float(batch[parameter])
-            parameter_values.append(batch[parameter])
+        # value_dict = dict()
+        # parameter_values = []
+        # for parameter in self.parameter_names:
+        #    value_dict[parameter] = np.float(batch[parameter])
+        #    parameter_values.append(batch[parameter])
         
         # Creating the training data for the classifier (marginal is created)
-        training_data = self.model.generate(batch_size=self.n_training_data, outputs=self.summary_names, with_values=value_dict)
-        summaries = self._get_summary_values(observed=False, batch=training_data)
+        # training_data = self.model.generate(batch_size=self.n_training_data, outputs=self.summary_names, with_values=value_dict)
+        # summaries = self._get_summary_values(observed=False, batch=training_data)
+
+        # Parse likelihood values
+        # likelihood = self._get_summary_values(batch=batch)
+
+        # Current parameter values of the batch
+        parameter_values = {parameter : float(batch[parameter]) for parameter in self.model.parameter_names}
+
+        # How to get current parameter values ?
+        training_data = self.model.generate(batch_size=self.n_training_data, \
+            outputs=self.summary_names, \
+            with_values=parameter_values)
+        likelihood = [training_data[summary_name] for summary_name in self.summary_names]
+        likelihood = np.column_stack(likelihood)
 
         # Create training data
-        X = np.vstack((summaries, self.marginal))
-        y = np.concatenate((np.ones(summaries.shape[0]), -1*np.ones(self.marginal.shape[0])))
+        X = np.vstack((likelihood, self.marginal))
+        y = np.concatenate((np.ones(likelihood.shape[0]), -1*np.ones(self.marginal.shape[0])))
 
         # Scale
         scaler = StandardScaler()
@@ -1714,7 +1731,7 @@ class BONFIRE(ParameterInference):
         # likelihood_value = np.exp(log_likelihood_value)
 
         # Joint log prior value
-        joint_log_prior = self.joint_prior.logpdf(parameter_values)
+        joint_log_prior = self.joint_prior.logpdf(list(parameter_values.values()))
 
         if not np.isfinite(joint_log_prior):
             epsilon = np.finfo(float).eps
