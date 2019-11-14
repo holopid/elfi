@@ -1516,47 +1516,6 @@ class BONFIRE(ParameterInference):
         # observed_ss = self._get_summary_values(observed=True)
         return observed_ss
 
-    # def _get_summary_values(self, observed=False, batch=None):
-    #     """Returns the summary statistics values of given data.
-    #    
-    #    Parameters:
-    #    ----------
-    #    observed : boolean
-    #        If true the function returns the summary statistcs of the observed data,
-    #        if false the function returns the summary statistics of given batch.
-    #    batch : numpy array
-    #        The data set containing the values of Summary nodes.
-        
-    #    Returns:
-    #    ----------
-    #    The summary statistics of given data for each variable (#observations x #summary statistcs)
-    #    """
-        # Create the list to store the values
-    #    ss_list = []
-    #    if observed is True:
-    #        for summary_name in self.summary_names:
-    #            summary_statistics = np.array([self.model[summary_name].observed])
-                # If summary statistics contain more than one value
-    #            if summary_statistics.ndim > 2:
-    #                for i in np.arange(summary_statistics.shape[2]):
-    #                    ss_list.append(summary_statistics[:,:,i][0])
-    #            elif summary_statistics.ndim == 2:
-    #                ss_list.append(summary_statistics[0])
-    #        return np.column_stack(ss_list)  # np.array(ss_list).T
-
-    #    elif observed is False:
-    #        if batch is None:
-    #            raise NotImplementedError("You need to give a batch.")
-    #        for summary_name in self.summary_names:
-    #            summary_statistics = np.array([batch[summary_name]])
-    #            # If summary statistics contain more than one value
-    #            if summary_statistics.ndim > 2:
-    #                for i in np.arange(summary_statistics.shape[2]):
-    #                    ss_list.append(summary_statistics[:,:,i][0])
-    #            elif summary_statistics.ndim == 2:
-    #                ss_list.append(summary_statistics[0])
-    #        return np.column_stack(ss_list)  # np.array(ss_list).T
-
     def _generate_marginal(self):
         """Class method documentation comes here."""
         batch = self.model.generate(self.n_training_data)
@@ -1676,20 +1635,6 @@ class BONFIRE(ParameterInference):
         """
         super().update(batch, batch_index)
 
-        # Dictionary and vector to store the fixed parameter values
-        # value_dict = dict()
-        # parameter_values = []
-        # for parameter in self.parameter_names:
-        #    value_dict[parameter] = np.float(batch[parameter])
-        #    parameter_values.append(batch[parameter])
-        
-        # Creating the training data for the classifier (marginal is created)
-        # training_data = self.model.generate(batch_size=self.n_training_data, outputs=self.summary_names, with_values=value_dict)
-        # summaries = self._get_summary_values(observed=False, batch=training_data)
-
-        # Parse likelihood values
-        # likelihood = self._get_summary_values(batch=batch)
-
         # Current parameter values of the batch
         parameter_values = {parameter : float(batch[parameter]) for parameter in self.model.parameter_names}
 
@@ -1752,8 +1697,8 @@ class BONFIRE(ParameterInference):
         # Stores the coefficients, used C value, and intercept
         self.state['coefficients'].append(coefficients)
         if self.CV_boolean is True:
-            self.state['C'].append(m.C_)
-        self.state['intercept'].append(intercept)
+            self.state['C'].append(np.float64(m.C_))
+        self.state['intercept'].append(intercept) #.tolist()
 
         # BO's code starts below
         self.state['n_evidence'] += self.batch_size
@@ -1778,7 +1723,11 @@ class BONFIRE(ParameterInference):
         if self.CV_boolean is True:
             return self.state['coefficients'], self.state['C']
         else:
-            return self.state['coefficients']
+            return self.state['coefficients'], self.logreg_config['C']
+    
+    def get_summary_names(self):
+        """Returns the summary names."""
+        return self.summary_names
 
     def _report_batch(self, batch_index, params, value):
         str = "Received batch {}:\n".format(batch_index)
